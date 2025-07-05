@@ -74,3 +74,65 @@ function HL7-FormatDate {
     param([datetime]$Date)
     return $Date.ToString('yyyyMMddHHmmss')
 }
+
+# ---------------------------------------------------------------------------
+# In-memory table helpers for HL7_MESSAGE_IN
+# ---------------------------------------------------------------------------
+
+if (-not $Global:HL7MessageTable) { $Global:HL7MessageTable = @() }
+
+function Insert-HL7MessageIn {
+    param(
+        [string]$MsgCategory,
+        [string]$Status,
+        [string]$HL7String,
+        [string]$OrderNumber,
+        [string]$SendingApplication
+    )
+    $entryCode = [string]($Global:HL7MessageTable.Count + 1)
+    $record = [pscustomobject]@{
+        ENTRY_CODE        = $entryCode
+        MSG_CATEGORY      = $MsgCategory
+        STATUS            = $Status
+        HL7_STRING        = $HL7String
+        ORDER_NUMBER      = $OrderNumber
+        SENDING_APPLICATION = $SendingApplication
+        SAMPLE_NUMBER     = ''
+    }
+    $Global:HL7MessageTable += $record
+    return $record
+}
+
+function Update-HL7MessageString {
+    param(
+        [string]$EntryCode,
+        [string]$HL7String
+    )
+    $rec = $Global:HL7MessageTable | Where-Object { $_.ENTRY_CODE -eq $EntryCode }
+    if ($rec) { $rec.HL7_STRING = $HL7String }
+}
+
+function Get-HL7MessageByOrder {
+    param(
+        [string]$OrderNumber,
+        [string]$SendingApplication
+    )
+    $Global:HL7MessageTable | Where-Object { $_.ORDER_NUMBER -eq $OrderNumber -and $_.SENDING_APPLICATION -eq $SendingApplication } | Select-Object -First 1
+}
+
+function Get-PendingHL7Messages {
+    $Global:HL7MessageTable | Where-Object { $_.STATUS -eq 'N' }
+}
+
+function Get-QueuedOrErroredHL7Messages {
+    $Global:HL7MessageTable | Where-Object { $_.STATUS -in @('P','E') }
+}
+
+function Update-HL7MessageStatus {
+    param(
+        [string]$EntryCode,
+        [string]$Status
+    )
+    $rec = $Global:HL7MessageTable | Where-Object { $_.ENTRY_CODE -eq $EntryCode }
+    if ($rec) { $rec.STATUS = $Status }
+}
