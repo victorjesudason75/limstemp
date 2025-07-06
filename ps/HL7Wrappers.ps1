@@ -68,7 +68,17 @@ function Rename-File {
     )
     $dir = Split-Path $New
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    Move-Item -Path $Old -Destination $New
+    $destination = $New
+    if (Test-Path $destination) {
+        $base = [System.IO.Path]::GetFileNameWithoutExtension($New)
+        $ext = [System.IO.Path]::GetExtension($New)
+        $counter = 1
+        while (Test-Path $destination) {
+            $destination = Join-Path $dir "$base`_$counter$ext"
+            $counter++
+        }
+    }
+    Move-Item -Path $Old -Destination $destination
 }
 
 function Create-LIMSLog {
