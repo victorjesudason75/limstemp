@@ -68,7 +68,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                 continue
             }
 
-            $files = Get-DirectoryFiles $inputDirectory '*'
+            $files = Get-DirectoryFiles $inputDirectory '*.hl7'
             Write-Host "Found $($files.Count) files to process" -ForegroundColor Cyan
             
             foreach ($file in $files) {
@@ -84,15 +84,16 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                         $msg = "Missing required fields in file $($file.Name)"
                         Write-Host $msg -ForegroundColor Yellow
                         Create-LIMSLog -Message $msg -Config $config
-                        $errorFileName = "$errorDirectory$($file.Name)"
-                        Rename-File $file.FullName $errorFileName
+                        $errorFileName = Join-Path $errorDirectory $file.Name
+                        $movedFile = Rename-File $file.FullName $errorFileName
+                        Write-Host "Moved to error directory: $movedFile" -ForegroundColor Yellow
                         continue
                     }
                     
                     $dateTimeHL7Out = Get-Date -Format 'yyyyMMddHHmmssfff'
-                    $newFileName = "$processedDirectory$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
-                    Rename-File $file.FullName $newFileName
-                    $msg = "Processed: $($file.Name) -> $newFileName"
+                    $newFileName = Join-Path $processedDirectory "$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
+                    $movedFile = Rename-File $file.FullName $newFileName
+                    $msg = "Processed: $($file.Name) -> $(Split-Path $movedFile -Leaf)"
                     Write-Host $msg -ForegroundColor Green
                     Create-LIMSLog -Message $msg -Config $config
                 }
@@ -197,9 +198,10 @@ function HL7_CREATE_MESSAGE {
         
         if ($HL7String) {
             $fileName = "$PSScriptRoot/../samples/out_${HL7MessageEntryCode}.hl7"
-            Rename-File -Old (New-TemporaryFile) -New $fileName
-            Set-Content -Path $fileName -Value $HL7String
-            $msg = "Created output file: $fileName"
+            $tempFile = New-TemporaryFile
+            $finalPath = Rename-File -Old $tempFile -New $fileName
+            Set-Content -Path $finalPath -Value $HL7String
+            $msg = "Created output file: $(Split-Path $finalPath -Leaf)"
             Write-Host $msg -ForegroundColor Green
             Create-LIMSLog -Message $msg -Config $config
         }
@@ -276,5 +278,3 @@ WHERE ENTRY_CODE = ?
         if ($hl7Handle) { HL7-DiscardMessage -Handle $hl7Handle | Out-Null }
     }
 }
-
-#Export-ModuleMember -Function SCHED_HL7_IN_MSG_READ, HL7_CREATE_MESSAGE, HL7_IN_INITIAL
