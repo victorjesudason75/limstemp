@@ -78,7 +78,11 @@ function Rename-File {
             $counter++
         }
     }
-    Move-Item -Path $Old -Destination $destination
+    if (Test-Path $New) {
+        Write-Host "Destination file already exists: $New. Skipping move." | Out-File -FilePath $config.LogPath -Append
+    } else {
+        Move-Item -Path $Old -Destination $New
+    }
 }
 
 function Create-LIMSLog {
