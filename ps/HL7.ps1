@@ -71,7 +71,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                         continue
                     }
                     
-                    $dateTimeHL7Out = HL7-FormatDate (Get-Date)
+                    $dateTimeHL7Out = Get-Date -Format 'yyyyMMddHHmmssfff'
                     $newFileName = "$processedDirectory$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
                     Rename-File $file.FullName $newFileName
                     Create-LIMSLog -Message "Processed file: $($file.Name) -> $newFileName" -Config $config
