@@ -1,11 +1,15 @@
 . "$PSScriptRoot/HL7Wrappers.ps1"
 
 $config = @{
-    ConfigPath = "C:\PowerShell-Scripts\SCHED_HL7_IN_MSG_READ\Config\Settings.json"
-    LogPath = "C:\PowerShell-Scripts\SCHED_HL7_IN_MSG_READ\Logs\HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
+    ConfigPath = $env:HL7ConfigPath ? (Join-Path $env:HL7ConfigPath 'Settings.json') : "$PSScriptRoot/../config/Settings.json"
+    LogPath = $env:HL7LogPath ? (Join-Path $env:HL7LogPath "HL7Processor_$(Get-Date -Format 'yyyyMMdd').log") : "$PSScriptRoot/../logs/HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
     DefaultStartID = 100000
     MaxRetryAttempts = 3
     RetryDelaySeconds = 5
+}
+
+if (-not (Test-Path $config.ConfigPath)) {
+    throw "Config file not found at $($config.ConfigPath)"
 }
 
 function SCHED_HL7_IN_MSG_READ {
@@ -39,7 +43,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     HL7-DiscardMessage $handle | Out-Null
 
                     if (-not $orderNumber -or -not $sendingApplication) {
-                        Create-LIMSLog "Order Number OR Sending Application not Found in file $($file.Name)"
+                        Create-LIMSLog -Message "Order Number OR Sending Application not Found in file $($file.Name)" -Config $config
                         $errorFileName = "$errorDirectory$($file.Name)"
                         Rename-File $file.FullName $errorFileName
                         continue
@@ -50,7 +54,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     Rename-File $file.FullName $newFileName
                 }
                 catch {
-                    Create-LIMSLog "Error processing file $($file.Name): $_"
+                    Create-LIMSLog -Message "Error processing file $($file.Name): $_" -Config $config
                     continue
                 }
             }
@@ -68,7 +72,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     HL7_IN_INITIAL -EntryCode $msg.ENTRY_CODE -Template $msg.MSG_CATEGORY -String $msg.HL7_STRING -Config $config
                 }
                 catch {
-                    Create-LIMSLog "Error processing message $($msg.ENTRY_CODE): $_"
+                    Create-LIMSLog -Message "Error processing message $($msg.ENTRY_CODE): $_" -Config $config
                 }
             }
         }
@@ -80,12 +84,12 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                 HL7_CREATE_MESSAGE -HL7MessageEntryCode $rec.ENTRY_CODE -HL7InInitialStatus $rec.STATUS -Config $config
             }
             catch {
-                Create-LIMSLog "Error creating output message for $($rec.ENTRY_CODE): $_"
+                Create-LIMSLog -Message "Error creating output message for $($rec.ENTRY_CODE): $_" -Config $config
             }
         }
     }
     catch {
-        Create-LIMSLog "Critical error in SCHED_HL7_IN_MSG_READ: $_"
+        Create-LIMSLog -Message "Critical error in SCHED_HL7_IN_MSG_READ: $_" -Config $config
         throw
     }
 }
@@ -115,7 +119,7 @@ function HL7_CREATE_MESSAGE {
         }
     }
     catch {
-        Create-LIMSLog "Error in HL7_CREATE_MESSAGE for $HL7MessageEntryCode: $_"
+        Create-LIMSLog -Message "Error in HL7_CREATE_MESSAGE for $HL7MessageEntryCode: $_" -Config $config
         throw
     }
 }
@@ -130,7 +134,7 @@ function HL7_IN_INITIAL {
     
     $hl7Handle = $null
     try {
-        Create-LIMSLog "Starting processing of HL7 message $EntryCode"
+        Create-LIMSLog -Message "Starting processing of HL7 message $EntryCode" -Config $config
         
         $hl7Handle = HL7-Parse -Message $String
         
@@ -154,12 +158,12 @@ WHERE ENTRY_CODE = ?
 
         Invoke-SqlQuery -Query $updateQuery -Parameters $params -Config $config -NonQuery
         Update-HL7MessageStatus -EntryCode $EntryCode -Status 'P' -Config $config
-        Create-LIMSLog "Successfully processed message $EntryCode ($messageControlId)"
+        Create-LIMSLog -Message "Successfully processed message $EntryCode ($messageControlId)" -Config $config
         return $true
     }
     catch {
-        Create-LIMSLog "Error processing message $EntryCode: $_"
-        $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET ERROR_MESSAGE = ? WHERE ENTRY_CODE = ?"
+        Create-LIMSLog -Message "Error processing message $EntryCode: $_" -Config $config
+        $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET STATUS = 'E', ERROR_MESSAGE = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
         $errorParams = @{
             ErrorMessage = $_.Exception.Message
             EntryCode = $EntryCode
