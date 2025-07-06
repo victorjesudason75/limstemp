@@ -114,6 +114,31 @@ function Rename-File {
         Write-Host "Successfully moved to: $New" -ForegroundColor DarkGray
         return $New
     }
+    catch [System.IO.IOException] {
+        # When the destination file exists, generate a unique name and retry
+        if ($_.Exception.Message -match 'already exists') {
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
+            $extension = [System.IO.Path]::GetExtension($New)
+            $dir = Split-Path $New -Parent
+            $counter = 1
+            do {
+                $uniqueName = "${baseName}_$counter$extension"
+                $uniquePath = Join-Path $dir $uniqueName
+                $counter++
+            } while (Test-Path $uniquePath)
+
+            Write-Host "Destination exists, retrying with new name: $uniqueName" -ForegroundColor Yellow
+            Move-Item -Path $Old -Destination $uniquePath -Force -ErrorAction Stop
+            Write-Host "Successfully moved to: $uniquePath" -ForegroundColor DarkGray
+            return $uniquePath
+        }
+        else {
+            $msg = "FILE MOVE ERROR: $_"
+            Write-Host $msg -ForegroundColor Red
+            Create-LIMSLog -Message $msg -Config $config
+            throw
+        }
+    }
     catch {
         $msg = "FILE MOVE ERROR: $_"
         Write-Host $msg -ForegroundColor Red
