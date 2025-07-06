@@ -1,0 +1,8 @@
+{
+    "DSN": "C2N_DEV_PGSQL64",
+    "UID": "c2n_dev",
+    "PWD": "xzfC9expHbktHdg4",
+	"HL7_IN_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\incoming\\",
+	"HL7_PROCESSED_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\processed\\",
+	"HL7_ERROR_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\error\\"	
+}
