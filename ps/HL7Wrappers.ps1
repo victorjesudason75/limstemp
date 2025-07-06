@@ -8,9 +8,16 @@ function Invoke-SqlQuery {
     
     $connection = $null
     try {
+        Write-Verbose "Executing SQL query: $($Query -replace '\s+', ' ')"
+        if ($Parameters.Count -gt 0) {
+            Write-Verbose "Parameters: $($Parameters | ConvertTo-Json -Compress)"
+        }
+
         $connection = New-Object System.Data.Odbc.OdbcConnection
         $settings = Get-Content $Config.ConfigPath -ErrorAction Stop | ConvertFrom-Json
         $connection.ConnectionString = "DSN=$($settings.DSN);UID=$($settings.UID);PWD=$($settings.PWD);"
+        
+        Write-Host "Connecting to database..." -ForegroundColor DarkGray
         $connection.Open()
 
         $command = New-Object System.Data.Odbc.OdbcCommand
@@ -18,29 +25,37 @@ function Invoke-SqlQuery {
         $command.CommandText = $Query
 
         foreach ($key in $Parameters.Keys) {
-            $param = $command.Parameters.AddWithValue("@$key", $Parameters[$key])
+            $paramValue = $Parameters[$key]
+            Write-Verbose "Binding parameter: @$key = '$paramValue'"
+            $param = $command.Parameters.AddWithValue("@$key", $paramValue)
             if ($Parameters[$key] -eq $null) {
                 $param.Value = [DBNull]::Value
             }
         }
 
         if ($NonQuery) {
-            return $command.ExecuteNonQuery()
+            $result = $command.ExecuteNonQuery()
+            Write-Host "Query executed. Rows affected: $result" -ForegroundColor DarkGray
+            return $result
         }
         else {
             $adapter = New-Object System.Data.Odbc.OdbcDataAdapter $command
             $dataset = New-Object System.Data.DataSet
-            $adapter.Fill($dataset) | Out-Null
+            $rowsReturned = $adapter.Fill($dataset)
+            Write-Host "Query returned $rowsReturned rows" -ForegroundColor DarkGray
             return $dataset.Tables[0]
         }
     }
     catch {
-        Create-LIMSLog -Message "Database error executing query [$Query]: $_" -Config $Config
+        $msg = "DATABASE ERROR: $_"
+        Write-Host $msg -ForegroundColor Red
+        Create-LIMSLog -Message $msg -Config $Config
         throw
     }
     finally {
         if ($connection -and $connection.State -eq 'Open') {
             $connection.Close()
+            Write-Verbose "Database connection closed"
         }
     }
 }
@@ -50,7 +65,11 @@ function Get-DirectoryFiles {
         [string]$Path,
         [string]$Filter = '*'
     )
-    if (-Not (Test-Path $Path)) { return @() }
+    if (-Not (Test-Path $Path)) { 
+        Write-Host "Directory not found: $Path" -ForegroundColor Yellow
+        return @() 
+    }
+    Write-Verbose "Scanning directory: $Path (Filter: $Filter)"
     Get-ChildItem -Path $Path -Filter $Filter -File
 }
 
@@ -58,6 +77,7 @@ function Get-FileContents {
     param(
         [string]$Path
     )
+    Write-Verbose "Reading file: $Path"
     Get-Content -Path $Path -Raw
 }
 
@@ -66,22 +86,28 @@ function Rename-File {
         [string]$Old,
         [string]$New
     )
-    $dir = Split-Path $New
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-    $destination = $New
-    if (Test-Path $destination) {
-        $base = [System.IO.Path]::GetFileNameWithoutExtension($New)
-        $ext = [System.IO.Path]::GetExtension($New)
-        $counter = 1
-        while (Test-Path $destination) {
-            $destination = Join-Path $dir "$base`_$counter$ext"
-            $counter++
+    try {
+        Write-Verbose "Moving file: $Old -> $New"
+        $dir = Split-Path $New
+        if (-not (Test-Path $dir)) { 
+            Write-Host "Creating directory: $dir" -ForegroundColor DarkGray
+            New-Item -ItemType Directory -Path $dir | Out-Null 
+        }
+        
+        if (Test-Path $New) {
+            $msg = "File already exists: $New"
+            Write-Host $msg -ForegroundColor Yellow
+            $msg | Out-File -FilePath $config.LogPath -Append
+        }
+        else {
+            Move-Item -Path $Old -Destination $New
+            Write-Host "File moved successfully" -ForegroundColor DarkGray
         }
     }
-    if (Test-Path $New) {
-        Write-Host "Destination file already exists: $New. Skipping move." | Out-File -FilePath $config.LogPath -Append
-    } else {
-        Move-Item -Path $Old -Destination $New
+    catch {
+        $msg = "FILE MOVE ERROR: $_"
+        Write-Host $msg -ForegroundColor Red
+        throw
     }
 }
 
@@ -91,16 +117,34 @@ function Create-LIMSLog {
         [hashtable]$Config
     )
     $logMessage = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
-    Write-Host $logMessage
+    
+    # Auto-color based on message content
+    switch -Regex ($Message) {
+        "error|fail|exception|not found|critical" { 
+            Write-Host $logMessage -ForegroundColor Red
+        }
+        "warn|missing|skipping" { 
+            Write-Host $logMessage -ForegroundColor Yellow 
+        }
+        "success|complete|processed|created" { 
+            Write-Host $logMessage -ForegroundColor Green 
+        }
+        default { 
+            Write-Host $logMessage -ForegroundColor Gray 
+        }
+    }
+    
+    # Write to log file
     $logDir = Split-Path $Config.LogPath
-    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+    if (-not (Test-Path $logDir)) { 
+        New-Item -ItemType Directory -Path $logDir | Out-Null 
+    }
     $logMessage | Out-File -FilePath $Config.LogPath -Append
 }
 
 function HL7-Parse {
-    param(
-        [string]$Message
-    )
+    param([string]$Message)
+    Write-Verbose "Parsing HL7 message"
     return @{ ORC=$Message; MSH=$Message }
 }
 
@@ -112,12 +156,17 @@ function HL7-FieldFromSegment {
         [string]$Field,
         [string]$Component
     )
+    Write-Verbose "Extracting field: Segment=$Segment, Field=$Field, Component=$Component"
     if ($Segment -eq 'ORC') { return '10001' }
     if ($Segment -eq 'MSH') { return 'SendingApp' }
     return ''
 }
 
-function HL7-DiscardMessage { param($Handle) return $true }
+function HL7-DiscardMessage { 
+    param($Handle) 
+    Write-Verbose "Discarding HL7 message handle"
+    return $true 
+}
 
 function HL7-FormatDate {
     param([datetime]$Date)

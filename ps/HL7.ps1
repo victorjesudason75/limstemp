@@ -1,7 +1,6 @@
 . "$PSScriptRoot/HL7Wrappers.ps1"
 
-# Configuration with paths relative to the script location. These can be
-# overridden using the HL7ConfigPath and HL7LogPath environment variables.
+# Configuration with paths relative to the script location
 $configPath = $env:HL7ConfigPath
 if (-not $configPath) {
     $configPath = "$PSScriptRoot/../config/Settings.json"
@@ -23,10 +22,15 @@ $config = @{
 
 # Ensure required folders exist
 $logDir = Split-Path $config.LogPath
-if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+if (-not (Test-Path $logDir)) { 
+    Write-Host "Creating log directory: $logDir" -ForegroundColor Cyan
+    New-Item -ItemType Directory -Path $logDir | Out-Null 
+}
 
 if (-not (Test-Path $config.ConfigPath)) {
-    throw "Config file not found at $($config.ConfigPath)"
+    $msg = "Config file not found at $($config.ConfigPath)"
+    Write-Host $msg -ForegroundColor Red
+    throw $msg
 }
 
 function SCHED_HL7_IN_MSG_READ {
@@ -43,20 +47,32 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
 "@
     
     try {
+        Write-Host "=== Starting HL7 Message Processing ===" -ForegroundColor Green
+        Write-Host "Querying active facilities..." -ForegroundColor Cyan
         $facilities = Invoke-SqlQuery -Query $HL7FilesQry -Config $config
         
+        Write-Host "Found $($facilities.Count) active facilities" -ForegroundColor Green
+
         foreach ($facility in $facilities) {
+            Write-Host "`nProcessing Facility: $($facility.ENTRY_NAME)" -ForegroundColor Yellow
+            Write-Host "Input Path: $($facility.HL7_IN_FILE_PATH)" -ForegroundColor Gray
+
             $inputDirectory = $facility.HL7_IN_FILE_PATH
             $processedDirectory = $facility.HL7_PROCESSED_FILE_PATH
             $errorDirectory = $facility.HL7_ERROR_FILE_PATH
 
             if (-not (Test-Path $inputDirectory)) {
-                Create-LIMSLog -Message "Input directory not found: $inputDirectory" -Config $config
+                $msg = "Input directory not found: $inputDirectory"
+                Write-Host $msg -ForegroundColor Red
+                Create-LIMSLog -Message $msg -Config $config
                 continue
             }
 
             $files = Get-DirectoryFiles $inputDirectory '*'
+            Write-Host "Found $($files.Count) files to process" -ForegroundColor Cyan
+            
             foreach ($file in $files) {
+                Write-Host "`nProcessing File: $($file.Name)" -ForegroundColor White
                 try {
                     $HL7String = Get-FileContents $file.FullName
                     $handle = HL7-Parse $HL7String
@@ -65,7 +81,9 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     HL7-DiscardMessage $handle | Out-Null
 
                     if (-not $orderNumber -or -not $sendingApplication) {
-                        Create-LIMSLog -Message "Order Number OR Sending Application not Found in file $($file.Name)" -Config $config
+                        $msg = "Missing required fields in file $($file.Name)"
+                        Write-Host $msg -ForegroundColor Yellow
+                        Create-LIMSLog -Message $msg -Config $config
                         $errorFileName = "$errorDirectory$($file.Name)"
                         Rename-File $file.FullName $errorFileName
                         continue
@@ -74,45 +92,85 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     $dateTimeHL7Out = Get-Date -Format 'yyyyMMddHHmmssfff'
                     $newFileName = "$processedDirectory$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
                     Rename-File $file.FullName $newFileName
-                    Create-LIMSLog -Message "Processed file: $($file.Name) -> $newFileName" -Config $config
+                    $msg = "Processed: $($file.Name) -> $newFileName"
+                    Write-Host $msg -ForegroundColor Green
+                    Create-LIMSLog -Message $msg -Config $config
                 }
                 catch {
-                    Create-LIMSLog -Message "Error processing file $($file.Name): $_" -Config $config
+                    $msg = "ERROR Processing $($file.Name): $_"
+                    Write-Host $msg -ForegroundColor Red
+                    Create-LIMSLog -Message $msg -Config $config
                     continue
                 }
             }
         }
 
+        Write-Host "`n=== Processing Database Messages ===" -ForegroundColor Green
         $moreMessagesToProcess = $true
+        $totalProcessed = 0
+        
         while ($moreMessagesToProcess) {
             $query = "SELECT ENTRY_CODE, MSG_CATEGORY, HL7_STRING FROM T_HL7_MESSAGE_IN WHERE STATUS = 'N' ORDER BY ENTRY_CODE"
             $messages = Invoke-SqlQuery -Query $query -Config $config
             $numMessages = $messages.Count
-            if ($numMessages -lt $MaxMessagesLoop) { $moreMessagesToProcess = $false }
+            
+            if ($numMessages -eq 0) {
+                Write-Host "No pending messages found." -ForegroundColor Gray
+                break
+            }
+
+            Write-Host "Processing batch of $numMessages messages..." -ForegroundColor Cyan
             
             foreach ($msg in $messages) {
+                Write-Host "Message ID: $($msg.ENTRY_CODE) [$($msg.MSG_CATEGORY)]" -ForegroundColor White
                 try {
-                    HL7_IN_INITIAL -EntryCode $msg.ENTRY_CODE -Template $msg.MSG_CATEGORY -String $msg.HL7_STRING -Config $config
+                    $result = HL7_IN_INITIAL -EntryCode $msg.ENTRY_CODE -Template $msg.MSG_CATEGORY -String $msg.HL7_STRING -Config $config
+                    if ($result) {
+                        $totalProcessed++
+                        Write-Host "Processed successfully" -ForegroundColor Green
+                    }
                 }
                 catch {
-                    Create-LIMSLog -Message "Error processing message $($msg.ENTRY_CODE): $_" -Config $config
+                    $msg = "ERROR Processing $($msg.ENTRY_CODE): $_"
+                    Write-Host $msg -ForegroundColor Red
+                    Create-LIMSLog -Message $msg -Config $config
+                }
+            }
+            
+            if ($numMessages -lt $MaxMessagesLoop) { $moreMessagesToProcess = $false }
+        }
+
+        Write-Host "`n=== Finalizing Processed Messages ===" -ForegroundColor Green
+        $qryHL7In = "SELECT ENTRY_CODE, STATUS FROM T_HL7_MESSAGE_IN WHERE STATUS IN ('P','E')"
+        $records = Invoke-SqlQuery -Query $qryHL7In -Config $config
+        
+        if ($records.Count -gt 0) {
+            Write-Host "Found $($records.Count) completed messages to finalize" -ForegroundColor Cyan
+            foreach ($rec in $records) {
+                Write-Host "Finalizing $($rec.ENTRY_CODE) [Status: $($rec.STATUS)]" -ForegroundColor White
+                try {
+                    HL7_CREATE_MESSAGE -HL7MessageEntryCode $rec.ENTRY_CODE -HL7InInitialStatus $rec.STATUS -Config $config
+                    Write-Host "Finalized successfully" -ForegroundColor Green
+                }
+                catch {
+                    $msg = "ERROR Finalizing $($rec.ENTRY_CODE): $_"
+                    Write-Host $msg -ForegroundColor Red
+                    Create-LIMSLog -Message $msg -Config $config
                 }
             }
         }
-
-        $qryHL7In = "SELECT ENTRY_CODE, STATUS FROM T_HL7_MESSAGE_IN WHERE STATUS IN ('P','E')"
-        $records = Invoke-SqlQuery -Query $qryHL7In -Config $config
-        foreach ($rec in $records) {
-            try {
-                HL7_CREATE_MESSAGE -HL7MessageEntryCode $rec.ENTRY_CODE -HL7InInitialStatus $rec.STATUS -Config $config
-            }
-            catch {
-                Create-LIMSLog -Message "Error creating output message for $($rec.ENTRY_CODE): $_" -Config $config
-            }
+        else {
+            Write-Host "No completed messages to finalize" -ForegroundColor Gray
         }
+
+        Write-Host "`n=== Processing Complete ===" -ForegroundColor Green
+        Write-Host "Total messages processed: $totalProcessed" -ForegroundColor Green
+        Write-Host "Log file: $($config.LogPath)" -ForegroundColor Gray
     }
     catch {
-        Create-LIMSLog -Message "Critical error in SCHED_HL7_IN_MSG_READ: $_" -Config $config
+        $msg = "CRITICAL ERROR: $_"
+        Write-Host $msg -ForegroundColor Red -BackgroundColor Black
+        Create-LIMSLog -Message $msg -Config $config
         throw
     }
 }
@@ -125,6 +183,8 @@ function HL7_CREATE_MESSAGE {
     )
     
     try {
+        Write-Host "Creating output for message $HL7MessageEntryCode" -ForegroundColor Cyan
+        
         $now = Get-Date
         $dateTimeHL7Out = HL7-FormatDate $now
         $query = "SELECT MSG_CATEGORY, HL7_STRING FROM T_HL7_MESSAGE_IN WHERE ENTRY_CODE = ?"
@@ -139,11 +199,20 @@ function HL7_CREATE_MESSAGE {
             $fileName = "$PSScriptRoot/../samples/out_${HL7MessageEntryCode}.hl7"
             Rename-File -Old (New-TemporaryFile) -New $fileName
             Set-Content -Path $fileName -Value $HL7String
-            Create-LIMSLog -Message "Created output HL7 file: $fileName" -Config $config
+            $msg = "Created output file: $fileName"
+            Write-Host $msg -ForegroundColor Green
+            Create-LIMSLog -Message $msg -Config $config
+        }
+        else {
+            $msg = "No HL7 content found for $HL7MessageEntryCode"
+            Write-Host $msg -ForegroundColor Yellow
+            Create-LIMSLog -Message $msg -Config $config
         }
     }
     catch {
-        Create-LIMSLog -Message "Error in HL7_CREATE_MESSAGE for ${HL7MessageEntryCode}: $_" -Config $config
+        $msg = "ERROR creating output for $HL7MessageEntryCode: $_"
+        Write-Host $msg -ForegroundColor Red
+        Create-LIMSLog -Message $msg -Config $config
         throw
     }
 }
@@ -158,7 +227,7 @@ function HL7_IN_INITIAL {
     
     $hl7Handle = $null
     try {
-        Create-LIMSLog -Message "Starting processing of HL7 message $EntryCode" -Config $config
+        Write-Host "Processing message $EntryCode [$Template]" -ForegroundColor Cyan
         
         $hl7Handle = HL7-Parse -Message $String
         
@@ -183,12 +252,17 @@ WHERE ENTRY_CODE = ?
             EntryCode = $EntryCode
         }
         
-        Invoke-SqlQuery -Query $updateQuery -Parameters $params -Config $config -NonQuery
-        Create-LIMSLog -Message "Successfully processed message $EntryCode ($messageControlId)" -Config $config
+        $rowsAffected = Invoke-SqlQuery -Query $updateQuery -Parameters $params -Config $config -NonQuery
+        $msg = "Updated database ($rowsAffected rows)"
+        Write-Host $msg -ForegroundColor Green
+        Create-LIMSLog -Message $msg -Config $config
         return $true
     }
     catch {
-        Create-LIMSLog -Message "Error processing message ${EntryCode}: $_" -Config $config
+        $msg = "ERROR processing $EntryCode: $_"
+        Write-Host $msg -ForegroundColor Red
+        Create-LIMSLog -Message $msg -Config $config
+        
         $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET STATUS = 'E', ERROR_MESSAGE = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
         $errorParams = @{
             ErrorMessage = $_.Exception.Message
