@@ -1,0 +1,8 @@
+{
+    "DSN": "dns",
+    "UID": "uid",
+    "PWD": "pwd",
+	"HL7_IN_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\incoming\\",
+	"HL7_PROCESSED_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\processed\\",
+	"HL7_ERROR_FILE_PATH": "C:\\PowerShell-Scripts\\SCHED_HL7_IN_MSG_READ\\error\\"	
+}
