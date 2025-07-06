@@ -110,3 +110,17 @@ function HL7-FormatDate {
     return $Date.ToString('yyyyMMddHHmmss')
 }
 
+function Update-HL7MessageStatus {
+    param(
+        [string]$EntryCode,
+        [string]$Status,
+        [hashtable]$Config
+    )
+    $query = "UPDATE T_HL7_MESSAGE_IN SET STATUS = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
+    $params = @{
+        Status = $Status
+        ProcessedDate = (Get-Date)
+        EntryCode = $EntryCode
+    }
+    Invoke-SqlQuery -Query $query -Parameters $params -Config $config -NonQuery
+}

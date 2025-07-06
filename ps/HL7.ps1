@@ -145,21 +145,19 @@ function HL7_IN_INITIAL {
         if (-not $messageControlId) { throw "Message Control ID not found" }
 
         $updateQuery = @"
-UPDATE T_HL7_MESSAGE_IN 
+UPDATE T_HL7_MESSAGE_IN
 SET MESSAGE_TYPE = ?,
-    MESSAGE_CONTROL_ID = ?,
-    STATUS = 'P',
-    PROCESSED_DATE = ?
+    MESSAGE_CONTROL_ID = ?
 WHERE ENTRY_CODE = ?
 "@
         $params = @{
             MessageType = $messageType
             MessageControlId = $messageControlId
-            ProcessedDate = (Get-Date)
             EntryCode = $EntryCode
         }
-        
+
         Invoke-SqlQuery -Query $updateQuery -Parameters $params -Config $config -NonQuery
+        Update-HL7MessageStatus -EntryCode $EntryCode -Status 'P' -Config $config
         Create-LIMSLog -Message "Successfully processed message $EntryCode ($messageControlId)" -Config $config
         return $true
     }
@@ -168,10 +166,10 @@ WHERE ENTRY_CODE = ?
         $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET STATUS = 'E', ERROR_MESSAGE = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
         $errorParams = @{
             ErrorMessage = $_.Exception.Message
-            ProcessedDate = (Get-Date)
             EntryCode = $EntryCode
         }
         Invoke-SqlQuery -Query $errorQuery -Parameters $errorParams -Config $config -NonQuery
+        Update-HL7MessageStatus -EntryCode $EntryCode -Status 'E' -Config $config
         throw
     }
     finally {
@@ -179,4 +177,4 @@ WHERE ENTRY_CODE = ?
     }
 }
 
-Export-ModuleMember -Function SCHED_HL7_IN_MSG_READ, HL7_CREATE_MESSAGE, HL7_IN_INITIAL
+Export-ModuleMember -Function SCHED_HL7_IN_MSG_READ, HL7_CREATE_MESSAGE, HL7_IN_INITIAL, Update-HL7MessageStatus
