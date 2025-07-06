@@ -1,9 +1,21 @@
 . "$PSScriptRoot/HL7Wrappers.ps1"
 
-# Configuration with paths relative to the script location
+# Configuration with paths relative to the script location. These can be
+# overridden using the HL7ConfigPath and HL7LogPath environment variables.
+$configPath = $env:HL7ConfigPath
+if (-not $configPath) {
+    $configPath = "$PSScriptRoot/../config/Settings.json"
+}
+
+$logDir = $env:HL7LogPath
+if (-not $logDir) {
+    $logDir = "$PSScriptRoot/../logs"
+}
+$logPath = Join-Path $logDir "HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
+
 $config = @{
-    ConfigPath = "$PSScriptRoot/../Config/settings.json"
-    LogPath = "$PSScriptRoot/../Logs/HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
+    ConfigPath = $configPath
+    LogPath = $logPath
     DefaultStartID = 100000
     MaxRetryAttempts = 3
     RetryDelaySeconds = 5
