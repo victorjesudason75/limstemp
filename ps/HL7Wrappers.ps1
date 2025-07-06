@@ -1,17 +1,47 @@
 function Invoke-SqlQuery {
     param(
-        [string]$Query
+        [string]$Query,
+        [hashtable]$Parameters = @{},
+        [hashtable]$Config,
+        [switch]$NonQuery
     )
-    Write-Host "[SQL] $Query"
-    # Placeholder: return sample data based on query
-    if ($Query -match 'HL7_IN_FILE_PATH') {
-        return @(
-            @{ HL7_IN_FILE_PATH = 'samples/'; HL7_PROCESSED_FILE_PATH='samples/processed/'; HL7_ERROR_FILE_PATH='samples/error/'; HL7_MSG_TEMP_IN='DEFAULT' }
-        )
-    } elseif ($Query -match 'T_HL7_MESSAGE_IN') {
-        return @()
-    } else {
-        return @()
+    
+    $connection = $null
+    try {
+        $connection = New-Object System.Data.Odbc.OdbcConnection
+        $settings = Get-Content $Config.ConfigPath -ErrorAction Stop | ConvertFrom-Json
+        $connection.ConnectionString = "DSN=$($settings.DSN);UID=$($settings.UID);PWD=$($settings.PWD);"
+        $connection.Open()
+
+        $command = New-Object System.Data.Odbc.OdbcCommand
+        $command.Connection = $connection
+        $command.CommandText = $Query
+
+        foreach ($key in $Parameters.Keys) {
+            $param = $command.Parameters.AddWithValue($key, $Parameters[$key])
+            if ($Parameters[$key] -eq $null) {
+                $param.Value = [DBNull]::Value
+            }
+        }
+
+        if ($NonQuery) {
+            return $command.ExecuteNonQuery()
+        }
+        else {
+            $adapter = New-Object System.Data.Odbc.OdbcDataAdapter $command
+            $dataset = New-Object System.Data.DataSet
+            $adapter.Fill($dataset) | Out-Null
+            return $dataset.Tables[0]
+        }
+    }
+    catch {
+        Create-LIMSLog "Database error executing query [$Query]: $_"
+        throw
+    }
+    finally {
+        if ($connection -and $connection.State -eq 'Open') {
+            $connection.Close()
+        }
     }
 }
 
@@ -45,7 +75,9 @@ function Create-LIMSLog {
     param(
         [string]$Message
     )
-    Write-Host "[LOG] $Message"
+    $logMessage = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+    Write-Host $logMessage
+    $logMessage | Out-File -FilePath $config.LogPath -Append
 }
 
 function HL7-Parse {
@@ -73,4 +105,19 @@ function HL7-DiscardMessage { param($Handle) return $true }
 function HL7-FormatDate {
     param([datetime]$Date)
     return $Date.ToString('yyyyMMddHHmmss')
+}
+
+function Update-HL7MessageStatus {
+    param(
+        [string]$EntryCode,
+        [string]$Status,
+        [hashtable]$Config
+    )
+    $query = "UPDATE T_HL7_MESSAGE_IN SET STATUS = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
+    $params = @{
+        Status = $Status
+        ProcessedDate = (Get-Date)
+        EntryCode = $EntryCode
+    }
+    Invoke-SqlQuery -Query $query -Parameters $params -Config $config -NonQuery
 }
