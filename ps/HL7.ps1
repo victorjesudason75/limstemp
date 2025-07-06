@@ -1,12 +1,17 @@
 . "$PSScriptRoot/HL7Wrappers.ps1"
 
+# Configuration with paths relative to the script location
 $config = @{
-    ConfigPath = $env:HL7ConfigPath ? (Join-Path $env:HL7ConfigPath 'Settings.json') : "$PSScriptRoot/../config/Settings.json"
-    LogPath = $env:HL7LogPath ? (Join-Path $env:HL7LogPath "HL7Processor_$(Get-Date -Format 'yyyyMMdd').log") : "$PSScriptRoot/../logs/HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
+    ConfigPath = "$PSScriptRoot/../Config/settings.json"
+    LogPath = "$PSScriptRoot/../Logs/HL7Processor_$(Get-Date -Format 'yyyyMMdd').log"
     DefaultStartID = 100000
     MaxRetryAttempts = 3
     RetryDelaySeconds = 5
 }
+
+# Ensure required folders exist
+$logDir = Split-Path $config.LogPath
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 
 if (-not (Test-Path $config.ConfigPath)) {
     throw "Config file not found at $($config.ConfigPath)"
@@ -33,6 +38,11 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
             $processedDirectory = $facility.HL7_PROCESSED_FILE_PATH
             $errorDirectory = $facility.HL7_ERROR_FILE_PATH
 
+            if (-not (Test-Path $inputDirectory)) {
+                Create-LIMSLog -Message "Input directory not found: $inputDirectory" -Config $config
+                continue
+            }
+
             $files = Get-DirectoryFiles $inputDirectory '*'
             foreach ($file in $files) {
                 try {
@@ -52,6 +62,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     $dateTimeHL7Out = HL7-FormatDate (Get-Date)
                     $newFileName = "$processedDirectory$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
                     Rename-File $file.FullName $newFileName
+                    Create-LIMSLog -Message "Processed file: $($file.Name) -> $newFileName" -Config $config
                 }
                 catch {
                     Create-LIMSLog -Message "Error processing file $($file.Name): $_" -Config $config
@@ -113,9 +124,10 @@ function HL7_CREATE_MESSAGE {
         $HL7String = $record.HL7_STRING
         
         if ($HL7String) {
-            $fileName = "samples/out_${HL7MessageEntryCode}.hl7"
+            $fileName = "$PSScriptRoot/../samples/out_${HL7MessageEntryCode}.hl7"
             Rename-File -Old (New-TemporaryFile) -New $fileName
             Set-Content -Path $fileName -Value $HL7String
+            Create-LIMSLog -Message "Created output HL7 file: $fileName" -Config $config
         }
     }
     catch {
@@ -145,19 +157,21 @@ function HL7_IN_INITIAL {
         if (-not $messageControlId) { throw "Message Control ID not found" }
 
         $updateQuery = @"
-UPDATE T_HL7_MESSAGE_IN
+UPDATE T_HL7_MESSAGE_IN 
 SET MESSAGE_TYPE = ?,
-    MESSAGE_CONTROL_ID = ?
+    MESSAGE_CONTROL_ID = ?,
+    STATUS = 'P',
+    PROCESSED_DATE = ?
 WHERE ENTRY_CODE = ?
 "@
         $params = @{
             MessageType = $messageType
             MessageControlId = $messageControlId
+            ProcessedDate = (Get-Date)
             EntryCode = $EntryCode
         }
-
+        
         Invoke-SqlQuery -Query $updateQuery -Parameters $params -Config $config -NonQuery
-        Update-HL7MessageStatus -EntryCode $EntryCode -Status 'P' -Config $config
         Create-LIMSLog -Message "Successfully processed message $EntryCode ($messageControlId)" -Config $config
         return $true
     }
@@ -166,10 +180,10 @@ WHERE ENTRY_CODE = ?
         $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET STATUS = 'E', ERROR_MESSAGE = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
         $errorParams = @{
             ErrorMessage = $_.Exception.Message
+            ProcessedDate = (Get-Date)
             EntryCode = $EntryCode
         }
         Invoke-SqlQuery -Query $errorQuery -Parameters $errorParams -Config $config -NonQuery
-        Update-HL7MessageStatus -EntryCode $EntryCode -Status 'E' -Config $config
         throw
     }
     finally {
@@ -177,4 +191,4 @@ WHERE ENTRY_CODE = ?
     }
 }
 
-Export-ModuleMember -Function SCHED_HL7_IN_MSG_READ, HL7_CREATE_MESSAGE, HL7_IN_INITIAL, Update-HL7MessageStatus
+Export-ModuleMember -Function SCHED_HL7_IN_MSG_READ, HL7_CREATE_MESSAGE, HL7_IN_INITIAL

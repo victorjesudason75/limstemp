@@ -18,7 +18,7 @@ function Invoke-SqlQuery {
         $command.CommandText = $Query
 
         foreach ($key in $Parameters.Keys) {
-            $param = $command.Parameters.AddWithValue($key, $Parameters[$key])
+            $param = $command.Parameters.AddWithValue("@$key", $Parameters[$key])
             if ($Parameters[$key] -eq $null) {
                 $param.Value = [DBNull]::Value
             }
@@ -122,5 +122,5 @@ function Update-HL7MessageStatus {
         ProcessedDate = (Get-Date)
         EntryCode = $EntryCode
     }
-    Invoke-SqlQuery -Query $query -Parameters $params -Config $config -NonQuery
+    Invoke-SqlQuery -Query $query -Parameters $params -Config $Config -NonQuery
 }
