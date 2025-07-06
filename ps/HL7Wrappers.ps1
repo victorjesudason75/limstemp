@@ -121,3 +121,4 @@ function Update-HL7MessageStatus {
     }
     Invoke-SqlQuery -Query $query -Parameters $params -Config $config -NonQuery
 }
+
