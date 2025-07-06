@@ -131,7 +131,7 @@ function HL7_CREATE_MESSAGE {
         }
     }
     catch {
-        Create-LIMSLog -Message "Error in HL7_CREATE_MESSAGE for $HL7MessageEntryCode: $_" -Config $config
+        Create-LIMSLog -Message "Error in HL7_CREATE_MESSAGE for ${HL7MessageEntryCode}: $_" -Config $config
         throw
     }
 }
@@ -176,7 +176,7 @@ WHERE ENTRY_CODE = ?
         return $true
     }
     catch {
-        Create-LIMSLog -Message "Error processing message $EntryCode: $_" -Config $config
+        Create-LIMSLog -Message "Error processing message ${EntryCode}: $_" -Config $config
         $errorQuery = "UPDATE T_HL7_MESSAGE_IN SET STATUS = 'E', ERROR_MESSAGE = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
         $errorParams = @{
             ErrorMessage = $_.Exception.Message
