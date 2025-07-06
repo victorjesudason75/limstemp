@@ -35,7 +35,7 @@ function Invoke-SqlQuery {
         }
     }
     catch {
-        Create-LIMSLog "Database error executing query [$Query]: $_"
+        Create-LIMSLog -Message "Database error executing query [$Query]: $_" -Config $Config
         throw
     }
     finally {
@@ -73,11 +73,14 @@ function Rename-File {
 
 function Create-LIMSLog {
     param(
-        [string]$Message
+        [string]$Message,
+        [hashtable]$Config
     )
     $logMessage = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
     Write-Host $logMessage
-    $logMessage | Out-File -FilePath $config.LogPath -Append
+    $logDir = Split-Path $Config.LogPath
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+    $logMessage | Out-File -FilePath $Config.LogPath -Append
 }
 
 function HL7-Parse {
@@ -107,17 +110,3 @@ function HL7-FormatDate {
     return $Date.ToString('yyyyMMddHHmmss')
 }
 
-function Update-HL7MessageStatus {
-    param(
-        [string]$EntryCode,
-        [string]$Status,
-        [hashtable]$Config
-    )
-    $query = "UPDATE T_HL7_MESSAGE_IN SET STATUS = ?, PROCESSED_DATE = ? WHERE ENTRY_CODE = ?"
-    $params = @{
-        Status = $Status
-        ProcessedDate = (Get-Date)
-        EntryCode = $EntryCode
-    }
-    Invoke-SqlQuery -Query $query -Parameters $params -Config $config -NonQuery
-}
