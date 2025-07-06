@@ -87,26 +87,37 @@ function Rename-File {
         [string]$New
     )
     try {
-        Write-Verbose "Moving file: $Old -> $New"
-        $dir = Split-Path $New
+        Write-Verbose "Attempting to move file: $Old -> $New"
+        $dir = Split-Path $New -Parent
         if (-not (Test-Path $dir)) { 
             Write-Host "Creating directory: $dir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $dir | Out-Null 
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null 
         }
         
         if (Test-Path $New) {
-            $msg = "File already exists: $New"
-            Write-Host $msg -ForegroundColor Yellow
-            $msg | Out-File -FilePath $config.LogPath -Append
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
+            $extension = [System.IO.Path]::GetExtension($New)
+            $counter = 1
+            $uniqueName = ""
+            
+            do {
+                $uniqueName = "${baseName}_$counter$extension"
+                $uniquePath = Join-Path $dir $uniqueName
+                $counter++
+            } while (Test-Path $uniquePath)
+            
+            Write-Host "File exists, using new name: $uniqueName" -ForegroundColor Yellow
+            $New = $uniquePath
         }
-        else {
-            Move-Item -Path $Old -Destination $New
-            Write-Host "File moved successfully" -ForegroundColor DarkGray
-        }
+        
+        Move-Item -Path $Old -Destination $New -Force -ErrorAction Stop
+        Write-Host "Successfully moved to: $New" -ForegroundColor DarkGray
+        return $New
     }
     catch {
         $msg = "FILE MOVE ERROR: $_"
         Write-Host $msg -ForegroundColor Red
+        Create-LIMSLog -Message $msg -Config $config
         throw
     }
 }
@@ -135,11 +146,11 @@ function Create-LIMSLog {
     }
     
     # Write to log file
-    $logDir = Split-Path $Config.LogPath
+    $logDir = Split-Path $Config.LogPath -Parent
     if (-not (Test-Path $logDir)) { 
-        New-Item -ItemType Directory -Path $logDir | Out-Null 
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null 
     }
-    $logMessage | Out-File -FilePath $Config.LogPath -Append
+    $logMessage | Out-File -FilePath $Config.LogPath -Append -Encoding utf8
 }
 
 function HL7-Parse {
