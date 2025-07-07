@@ -98,24 +98,42 @@ function Rename-File {
     $target = $New
     $attempt = 0
 
-    while (Test-Path $target) {
-        $attempt++
-        $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($New)
-        $extension = [System.IO.Path]::GetExtension($New)
-        $target    = Join-Path $dir "${baseName}_$attempt$extension"
-        Write-Host "Destination exists, using new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
-    }
+    while ($true) {
+        while (Test-Path $target) {
+            $attempt++
+            $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($New)
+            $extension = [System.IO.Path]::GetExtension($New)
+            $target    = Join-Path $dir "${baseName}_$attempt$extension"
+            Write-Host "Destination exists, using new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
+        }
 
-    try {
-        Move-Item -Path $Old -Destination $target -Force -ErrorAction Stop
-        Write-Host "Successfully moved to: $target" -ForegroundColor DarkGray
-        return $target
-    }
-    catch {
-        $msg = "FILE MOVE ERROR: $_"
-        Write-Host $msg -ForegroundColor Red
-        Create-LIMSLog -Message $msg -Config $config
-        throw
+        try {
+            Move-Item -Path $Old -Destination $target -Force -ErrorAction Stop
+            Write-Host "Successfully moved to: $target" -ForegroundColor DarkGray
+            return $target
+        }
+        catch [System.IO.IOException] {
+            if ($_.Exception.Message -match 'already exists') {
+                $attempt++
+                $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($New)
+                $extension = [System.IO.Path]::GetExtension($New)
+                $target    = Join-Path $dir "${baseName}_$attempt$extension"
+                Write-Host "Destination exists, retrying with new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
+                continue
+            }
+            else {
+                $msg = "FILE MOVE ERROR: $_"
+                Write-Host $msg -ForegroundColor Red
+                Create-LIMSLog -Message $msg -Config $config
+                throw
+            }
+        }
+        catch {
+            $msg = "FILE MOVE ERROR: $_"
+            Write-Host $msg -ForegroundColor Red
+            Create-LIMSLog -Message $msg -Config $config
+            throw
+        }
     }
 }
 
