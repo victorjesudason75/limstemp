@@ -195,6 +195,15 @@ function HL7-DiscardMessage {
 }
 
 function HL7-FormatDate {
+    <#
+    .SYNOPSIS
+        Format a date as an HL7 timestamp.
+
+    .DESCRIPTION
+        Returns a timestamp string with millisecond precision.  The extra
+        precision ensures that processed filenames remain unique even when
+        multiple files are handled within the same second.
+    #>
     param([datetime]$Date)
     return $Date.ToString('yyyyMMddHHmmssfff')
 }
