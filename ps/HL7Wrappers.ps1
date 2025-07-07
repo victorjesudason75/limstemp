@@ -86,64 +86,46 @@ function Rename-File {
         [string]$Old,
         [string]$New
     )
-    try {
-        Write-Verbose "Attempting to move file: $Old -> $New"
-        $dir = Split-Path $New -Parent
-        if (-not (Test-Path $dir)) { 
-            Write-Host "Creating directory: $dir" -ForegroundColor DarkGray
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null 
-        }
-        
-        if (Test-Path $New) {
-            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
-            $extension = [System.IO.Path]::GetExtension($New)
-            $counter = 1
-            $uniqueName = ""
-            
-            do {
-                $uniqueName = "${baseName}_$counter$extension"
-                $uniquePath = Join-Path $dir $uniqueName
-                $counter++
-            } while (Test-Path $uniquePath)
-            
-            Write-Host "File exists, using new name: $uniqueName" -ForegroundColor Yellow
-            $New = $uniquePath
-        }
-        
-        Move-Item -Path $Old -Destination $New -Force -ErrorAction Stop
-        Write-Host "Successfully moved to: $New" -ForegroundColor DarkGray
-        return $New
-    }
-    catch [System.IO.IOException] {
-        # When the destination file exists, generate a unique name and retry
-        if ($_.Exception.Message -match 'already exists') {
-            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
-            $extension = [System.IO.Path]::GetExtension($New)
-            $dir = Split-Path $New -Parent
-            $counter = 1
-            do {
-                $uniqueName = "${baseName}_$counter$extension"
-                $uniquePath = Join-Path $dir $uniqueName
-                $counter++
-            } while (Test-Path $uniquePath)
 
-            Write-Host "Destination exists, retrying with new name: $uniqueName" -ForegroundColor Yellow
-            Move-Item -Path $Old -Destination $uniquePath -Force -ErrorAction Stop
-            Write-Host "Successfully moved to: $uniquePath" -ForegroundColor DarkGray
-            return $uniquePath
+    Write-Verbose "Attempting to move file: $Old -> $New"
+
+    $dir = Split-Path $New -Parent
+    if (-not (Test-Path $dir)) {
+        Write-Host "Creating directory: $dir" -ForegroundColor DarkGray
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    $target = $New
+    $attempt = 0
+
+    while ($true) {
+        try {
+            Move-Item -Path $Old -Destination $target -Force -ErrorAction Stop
+            Write-Host "Successfully moved to: $target" -ForegroundColor DarkGray
+            return $target
         }
-        else {
+        catch [System.IO.IOException] {
+            if ($_.Exception.Message -match 'already exists') {
+                $attempt++
+                $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
+                $extension = [System.IO.Path]::GetExtension($New)
+                $target = Join-Path $dir "${baseName}_$attempt$extension"
+                Write-Host "Destination exists, retrying with new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
+                continue
+            }
+            else {
+                $msg = "FILE MOVE ERROR: $_"
+                Write-Host $msg -ForegroundColor Red
+                Create-LIMSLog -Message $msg -Config $config
+                throw
+            }
+        }
+        catch {
             $msg = "FILE MOVE ERROR: $_"
             Write-Host $msg -ForegroundColor Red
             Create-LIMSLog -Message $msg -Config $config
             throw
         }
-    }
-    catch {
-        $msg = "FILE MOVE ERROR: $_"
-        Write-Host $msg -ForegroundColor Red
-        Create-LIMSLog -Message $msg -Config $config
-        throw
     }
 }
 
@@ -206,7 +188,7 @@ function HL7-DiscardMessage {
 
 function HL7-FormatDate {
     param([datetime]$Date)
-    return $Date.ToString('yyyyMMddHHmmss')
+    return $Date.ToString('yyyyMMddHHmmssfff')
 }
 
 function Update-HL7MessageStatus {
