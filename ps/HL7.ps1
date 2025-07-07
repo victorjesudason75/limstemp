@@ -85,7 +85,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                         Write-Host $msg -ForegroundColor Yellow
                         Create-LIMSLog -Message $msg -Config $config
                         $errorFileName = Join-Path $errorDirectory $file.Name
-                        $movedFile = Rename-File $file.FullName $errorFileName
+                        $movedFile = Rename-File $file.FullName $errorFileName -Config $config
                         Write-Host "Moved to error directory: $movedFile" -ForegroundColor Yellow
                         continue
                     }
@@ -93,7 +93,7 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                     # Use helper to get consistent timestamp with millisecond precision
                     $dateTimeHL7Out = HL7-FormatDate (Get-Date)
                     $newFileName = Join-Path $processedDirectory "$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
-                    $movedFile = Rename-File $file.FullName $newFileName
+                    $movedFile = Rename-File $file.FullName $newFileName -Config $config
                     $msg = "Processed: $($file.Name) -> $(Split-Path $movedFile -Leaf)"
                     Write-Host $msg -ForegroundColor Green
                     Create-LIMSLog -Message $msg -Config $config
@@ -200,7 +200,7 @@ function HL7_CREATE_MESSAGE {
         if ($HL7String) {
             $fileName = "$PSScriptRoot/../samples/out_${HL7MessageEntryCode}.hl7"
             $tempFile = New-TemporaryFile
-            $finalPath = Rename-File -Old $tempFile -New $fileName
+            $finalPath = Rename-File -Old $tempFile -New $fileName -Config $config
             Set-Content -Path $finalPath -Value $HL7String
             $msg = "Created output file: $(Split-Path $finalPath -Leaf)"
             Write-Host $msg -ForegroundColor Green
