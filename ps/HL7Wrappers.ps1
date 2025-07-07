@@ -84,7 +84,8 @@ function Get-FileContents {
 function Rename-File {
     param(
         [string]$Old,
-        [string]$New
+        [string]$New,
+        [hashtable]$Config = $null
     )
 
     Write-Verbose "Attempting to move file: $Old -> $New"
@@ -104,6 +105,7 @@ function Rename-File {
         try {
             Move-Item -Path $Old -Destination $target -Force -ErrorAction Stop
             Write-Host "Successfully moved to: $target" -ForegroundColor DarkGray
+            if ($Config) { Create-LIMSLog -Message "moved to $target" -Config $Config }
             return $target
         }
         catch [System.IO.IOException] {
@@ -117,19 +119,20 @@ function Rename-File {
                     $target = Join-Path $dir "${baseName}_${attempt}${extension}"
                 }
                 Write-Host "Destination exists, retrying with new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
+                if ($Config) { Create-LIMSLog -Message "destination exists; renamed to $(Split-Path $target -Leaf)" -Config $Config }
                 continue
             }
             else {
                 $msg = "FILE MOVE ERROR: $_"
                 Write-Host $msg -ForegroundColor Red
-                Create-LIMSLog -Message $msg -Config $config
+                if ($Config) { Create-LIMSLog -Message $msg -Config $Config }
                 throw
             }
         }
         catch {
             $msg = "FILE MOVE ERROR: $_"
             Write-Host $msg -ForegroundColor Red
-            Create-LIMSLog -Message $msg -Config $config
+            if ($Config) { Create-LIMSLog -Message $msg -Config $Config }
             throw
         }
     }
