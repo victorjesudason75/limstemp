@@ -90,7 +90,8 @@ WHERE HL7facilityDetails.ACTIVE = 'T' AND facility.Z_HL7 = 'T'
                         continue
                     }
                     
-                    $dateTimeHL7Out = Get-Date -Format 'yyyyMMddHHmmssfff'
+                    # Use helper to get consistent timestamp with millisecond precision
+                    $dateTimeHL7Out = HL7-FormatDate (Get-Date)
                     $newFileName = Join-Path $processedDirectory "$($dateTimeHL7Out)-$orderNumber-$sendingApplication.txt"
                     $movedFile = Rename-File $file.FullName $newFileName
                     $msg = "Processed: $($file.Name) -> $(Split-Path $movedFile -Leaf)"
