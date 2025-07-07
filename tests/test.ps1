@@ -35,3 +35,10 @@ Describe 'Rename-File' {
     }
 }
 
+Describe 'HL7-FormatDate' {
+    It 'Includes milliseconds for uniqueness' {
+        $date = Get-Date '2025-01-01T12:34:56.789'
+        HL7-FormatDate $date | Should -Be '20250101123456789'
+    }
+}
+
