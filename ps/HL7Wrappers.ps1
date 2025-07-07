@@ -95,18 +95,12 @@ function Rename-File {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
 
-    $target = $New
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($New)
+    $extension = [System.IO.Path]::GetExtension($New)
     $attempt = 0
+    $target = $New
 
     while ($true) {
-        while (Test-Path $target) {
-            $attempt++
-            $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($New)
-            $extension = [System.IO.Path]::GetExtension($New)
-            $target    = Join-Path $dir "${baseName}_$attempt$extension"
-            Write-Host "Destination exists, using new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
-        }
-
         try {
             Move-Item -Path $Old -Destination $target -Force -ErrorAction Stop
             Write-Host "Successfully moved to: $target" -ForegroundColor DarkGray
@@ -115,9 +109,13 @@ function Rename-File {
         catch [System.IO.IOException] {
             if ($_.Exception.Message -match 'already exists') {
                 $attempt++
-                $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($New)
-                $extension = [System.IO.Path]::GetExtension($New)
-                $target    = Join-Path $dir "${baseName}_$attempt$extension"
+                if ($attempt -gt 10) {
+                    $guid = [guid]::NewGuid().ToString('N')
+                    $target = Join-Path $dir "${baseName}_${guid}${extension}"
+                }
+                else {
+                    $target = Join-Path $dir "${baseName}_${attempt}${extension}"
+                }
                 Write-Host "Destination exists, retrying with new name: $(Split-Path $target -Leaf)" -ForegroundColor Yellow
                 continue
             }
